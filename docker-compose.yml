@@ -1,0 +1,162 @@
+services:
+  # ================================================================
+  # CAPA DE DATOS E INFRAESTRUCTURA
+  # ================================================================
+
+  # 1. PostgreSQL (Base de datos relacional maestra)
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: immobili-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: immobili_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - immobili-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d immobili_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Elasticsearch (Motor de búsqueda rápida)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+    container_name: immobili-elastic
+    environment:
+      - node.name=elastic-node-1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./data/elastic:/usr/share/elasticsearch/data
+    networks:
+      - immobili-network
+
+  # 3. Kibana (Visualizador de datos para Elastic - Opcional)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.10
+    container_name: immobili-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    depends_on:
+      - elasticsearch
+    networks:
+      - immobili-network
+
+  # ================================================================
+  # CAPA DE BACKEND (Spring Boot Microservices)
+  # ================================================================
+
+  # 4. Eureka Server (Discovery Service)
+  micro-eureka:
+    # NOTA LA RUTA: Entra a 'backend', luego a la carpeta del servicio
+    build: ./backend/micro-eureka
+    container_name: micro-eureka
+    ports:
+      - "8761:8761"
+    networks:
+      - immobili-network
+
+  # 5. API Gateway (Punto de entrada único)
+  micro-gateway:
+    build: ./backend/micro-gateway
+    container_name: micro-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://micro-eureka:8761/eureka/
+    depends_on:
+      - micro-eureka
+    networks:
+      - immobili-network
+
+  # 6. Property Service (Negocio Principal)
+  micro-properties:
+    build: ./backend/micro-properties
+    container_name: micro-properties
+    ports:
+      - "8081:8081"
+    environment:
+      # Conexión a Postgres
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/immobili_db
+      - SPRING_DATASOURCE_USERNAME=admin
+      - SPRING_DATASOURCE_PASSWORD=password123
+      # Conexión a Elastic
+      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200
+      # Conexión a Eureka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://micro-eureka:8761/eureka/
+    depends_on:
+      postgres-db:
+        condition: service_healthy # Espera a que la BD esté lista
+      elasticsearch:
+        condition: service_started
+      micro-eureka:
+        condition: service_started
+    networks:
+      - immobili-network
+
+  # 7. Agent Service (Gestión de Agentes)
+  micro-agents:
+    build: ./backend/micro-agents
+    container_name: micro-agents
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/immobili_db
+      - SPRING_DATASOURCE_USERNAME=admin
+      - SPRING_DATASOURCE_PASSWORD=password123
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://micro-eureka:8761/eureka/
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      micro-eureka:
+        condition: service_started
+    networks:
+      - immobili-network
+
+  # # 8. Notification Service (Correos y Contacto)
+  # micro-notifications:
+  #   build: ./backend/micro-notifications
+  #   container_name: micro-notifications
+  #   environment:
+  #     - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://micro-eureka:8761/eureka/
+  #     # Aquí irían variables SMTP para envío real de correos
+  #   depends_on:
+  #     micro-eureka:
+  #       condition: service_started
+  #   networks:
+  #     - immobili-network
+
+  # ================================================================
+  # CAPA DE FRONTEND (React)
+  # ================================================================
+
+  # 9. React Frontend
+  frontend-react:
+    # NOTA LA RUTA: Apunta a la carpeta del submódulo frontend
+    build: ./frontend
+    container_name: immobili-frontend
+    ports:
+      # Mapea puerto 3000 de tu PC al 80 del contenedor (asumiendo Nginx)
+      - "3000:80"
+    depends_on:
+      - micro-gateway
+    networks:
+      - immobili-network
+
+# Red compartida
+networks:
+  immobili-network:
+    driver: bridge

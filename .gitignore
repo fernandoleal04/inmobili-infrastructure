@@ -1,0 +1,27 @@
+# --- INFRAESTRUCTURA & DATOS (LO MÁS IMPORTANTE) ---
+data/
+volumes/
+inmobili-infrastructure/data/
+*.log
+
+# --- JAVA / MAVEN ---
+target/
+*.class
+.mvn/
+*.jar
+
+# --- IDEs (Configuraciones de tu editor) ---
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# --- NODE / REACT ---
+node_modules/
+dist/
+build/
+npm-debug.log
+yarn-error.log
+
+# --- SECRETOS (Nunca subir esto) ---
+.env
